@@ -1,0 +1,85 @@
+
+services:
+  # Data Lake (MinIO)
+  minio:
+    image: minio/minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio_data:/data
+
+  # Data Warehouse (PostgreSQL)
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: ecommerce_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  pgadmin:
+    image: dpage/pgadmin4
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+
+  # Message Broker (Kafka)
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.3.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  kafka:
+    image: confluentinc/cp-kafka:7.3.0
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+
+  # Orchestrator (Airflow)
+  # (Simplifié pour le prototype - image standard avec db interne)
+  airflow:
+    image: apache/airflow:2.7.0
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://user:password@postgres/warehouse
+    volumes:
+      - ./airflow/dags:/opt/airflow/dags
+    depends_on:
+      - postgres
+    ports:
+      - "8081:8080"
+    command: standalone
+
+  # Streamlit Dashboard
+  dashboard:
+    build: ./dashboard
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./ecommerce_sales.json:/app/ecommerce_sales.json
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
+volumes:
+  minio_data:
+  postgres_data:

@@ -1,0 +1,4 @@
+ecommerce_sales.json
+gold_analytics.json
+*.txt
+__pycache__/
