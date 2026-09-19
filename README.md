@@ -28,7 +28,7 @@ Exécutez l'orchestrateur qui s'occupe du Scraping, de l'ETL, de Kafka et qui ou
 \\\ash
 python run_full_pipeline.py
 \\\`n
-## 🌐 Interfaces Accessibles
+## Interfaces Accessibles
 Une fois le projet lancé, vous pouvez accéder à :
 - **Dashboard Streamlit** : [http://localhost:8501](http://localhost:8501)
 - **MinIO Console (Data Lake)** : [http://localhost:9001](http://localhost:9001) (admin / password)
