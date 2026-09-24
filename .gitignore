@@ -1,4 +1,32 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+venv/
+
+# Pipeline outputs (only the sample dataset is versioned)
+data/*
+!data/sample_products.csv
 ecommerce_sales.json
 gold_analytics.json
-*.txt
-__pycache__/
+*.log
+
+# Jars, binaries, local databases
+*.jar
+*.db
+*.sqlite
+
+# Airflow runtime files
+airflow/logs/
+airflow/*.cfg
+airflow/webserver_config.py
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
