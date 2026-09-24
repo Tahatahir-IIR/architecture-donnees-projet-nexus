@@ -1,0 +1,26 @@
+# Scraping
+requests>=2.31
+beautifulsoup4>=4.12
+
+# Transformation
+pandas>=2.0
+
+# Data lake (MinIO, S3 API)
+boto3>=1.34
+
+# Warehouse (PostgreSQL)
+SQLAlchemy>=2.0
+psycopg2-binary>=2.9
+
+# Streaming
+kafka-python>=2.0
+
+# Scheduling without Airflow
+schedule>=1.2
+
+# Dashboard
+streamlit>=1.30
+plotly>=5.18
+
+# Optional: load variables from a .env file
+python-dotenv>=1.0
