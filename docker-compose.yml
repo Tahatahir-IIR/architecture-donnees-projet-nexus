@@ -1,29 +1,30 @@
-
 services:
-  # Data Lake (MinIO)
+  # Data lake (S3 compatible)
   minio:
     image: minio/minio
     ports:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: password
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-password}
     command: server /data --console-address ":9001"
     volumes:
       - minio_data:/data
 
-  # Data Warehouse (PostgreSQL)
+  # Data warehouse
   postgres:
     image: postgres:15
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: ecommerce_db
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      POSTGRES_DB: ${POSTGRES_DB:-ecommerce_db}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      # creates the separate "airflow" metadata database on first start
+      - ./sql/init:/docker-entrypoint-initdb.d:ro
 
   pgadmin:
     image: dpage/pgadmin4
@@ -35,7 +36,7 @@ services:
     depends_on:
       - postgres
 
-  # Message Broker (Kafka)
+  # Message broker
   zookeeper:
     image: confluentinc/cp-zookeeper:7.3.0
     environment:
@@ -54,31 +55,44 @@ services:
     depends_on:
       - zookeeper
 
-  # Orchestrator (Airflow)
-  # (Simplifié pour le prototype - image standard avec db interne)
+  # Orchestrator (single-container "standalone" mode, for local use only)
   airflow:
     image: apache/airflow:2.7.0
     environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://user:password@postgres/warehouse
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-password}@postgres:5432/airflow
+      # dependencies needed by the pipeline scripts inside the container
+      _PIP_ADDITIONAL_REQUIREMENTS: requests beautifulsoup4 pandas boto3 SQLAlchemy psycopg2-binary
+      # the pipeline scripts reach the other containers through the compose network
+      PROJECT_DIR: /opt/airflow/project
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-admin}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-password}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB:-ecommerce_db}
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-password}
+      PIPELINE_ARGS: ${PIPELINE_ARGS:-}
     volumes:
       - ./airflow/dags:/opt/airflow/dags
+      - ./:/opt/airflow/project
     depends_on:
       - postgres
+      - minio
     ports:
       - "8081:8080"
     command: standalone
 
-  # Streamlit Dashboard
+  # Streamlit dashboard (reads data/silver and data/gold)
   dashboard:
     build: ./dashboard
     ports:
       - "8501:8501"
     volumes:
-      - ./ecommerce_sales.json:/app/ecommerce_sales.json
+      - ./data:/app/data:ro
     restart: unless-stopped
-    depends_on:
-      - postgres
 
 volumes:
   minio_data:
