@@ -1,45 +1,65 @@
+"""Run the batch pipeline end to end: scrape -> transform -> MinIO -> PostgreSQL.
+
+Usage (from the repository root):
+    python run_full_pipeline.py                 # live scraping, all steps
+    python run_full_pipeline.py --sample        # use data/sample_products.csv instead of scraping
+    python run_full_pipeline.py --sample --skip-minio --skip-postgres   # offline check
+    python run_full_pipeline.py --dashboard     # also start the Streamlit dashboard at the end
+
+Each step is a separate script executed with subprocess.run; the pipeline stops
+at the first step that exits with a non-zero code. Works on Windows, Linux and macOS.
+"""
+import argparse
 import subprocess
-import time
 import sys
-import os
+import time
+from pathlib import Path
 
-def run_project():
-    print("🚀 Démarrage de la synchronisation totale du pipeline Big Data...")
-    
-    # 1. Scraping des données (Batch)
-    print("\n--- ÉTAPE 1 : Scraping (Jumia/MarjaneMall) ---")
-    subprocess.run(["python", "scrapers/ecommerce_scraper.py"])
-    
-    # 2. Upload vers le Data Lake (MinIO)
-    print("\n--- ÉTAPE 2 : Stockage Medallion (MinIO) ---")
-    subprocess.run(["python", "upload_medallion.py"])
-    
-    # 3. Transformation ETL (Spark/Pandas)
-    print("\n--- ÉTAPE 3 : Transformation & Analytics (Postgres) ---")
-    subprocess.run(["python", "spark_jobs/simple_etl.py"])
-    
-    # 4. Lancement du Streaming & Dashboard
-    print("\n--- ÉTAPE 4 : Lancement du Temps Réel (Kafka & Streamlit) ---")
-    
-    # Ouvrir le Consumer Kafka dans un nouveau terminal
-    print("📡 Lancement du Consommateur Kafka...")
-    subprocess.Popen(["start", "cmd", "/k", "python", "kafka_consumer.py"], shell=True)
-    
-    # Ouvrir le Producer Kafka dans un nouveau terminal
-    print("📡 Lancement du Producteur Kafka...")
-    subprocess.Popen(["start", "cmd", "/k", "python", "kafka_producer.py"], shell=True)
-    
-    # Lancer le Dashboard Streamlit
-    print("📊 Lancement du Dashboard Senior...")
-    try:
-        subprocess.Popen(["python", "-m", "streamlit", "run", "dashboard/ecommerce_app_v_senior.py"])
-    except Exception as e:
-        print(f"⚠️ Erreur lors du lancement de Streamlit : {e}")
+ROOT = Path(__file__).resolve().parent
 
-    print("\n✅ TOUT EST SYNCHRONISÉ !")
-    print("1. Regardez les fenêtres noires qui se sont ouvertes pour Kafka.")
-    print("2. Votre navigateur va s'ouvrir sur le Dashboard.")
-    print("3. Les données sont à jour dans Postgres et MinIO.")
+
+def run_step(label: str, command: list) -> None:
+    print(f"\n=== {label} ===")
+    print("$", " ".join(command))
+    started = time.time()
+    result = subprocess.run(command, cwd=ROOT)
+    if result.returncode != 0:
+        print(f"Step '{label}' failed with exit code {result.returncode}", file=sys.stderr)
+        sys.exit(result.returncode)
+    print(f"Step '{label}' finished in {time.time() - started:.1f}s")
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--sample", action="store_true", help="use the committed sample dataset")
+    parser.add_argument("--skip-minio", action="store_true", help="do not upload to MinIO")
+    parser.add_argument("--skip-postgres", action="store_true", help="do not load PostgreSQL")
+    parser.add_argument("--dashboard", action="store_true", help="start the Streamlit dashboard afterwards")
+    args = parser.parse_args(argv)
+
+    python = sys.executable
+
+    scrape_cmd = [python, "scrapers/ecommerce_scraper.py"]
+    if args.sample:
+        scrape_cmd.append("--sample")
+    run_step("1/4 Scraping (bronze)", scrape_cmd)
+    run_step("2/4 Transformation (silver + gold)", [python, "etl/transform.py"])
+    if args.skip_minio:
+        print("\n=== 3/4 MinIO upload skipped ===")
+    else:
+        run_step("3/4 Data lake upload (MinIO)", [python, "upload_medallion.py"])
+    if args.skip_postgres:
+        print("\n=== 4/4 PostgreSQL load skipped ===")
+    else:
+        run_step("4/4 Warehouse load (PostgreSQL)", [python, "warehouse/load_postgres.py"])
+
+    print("\nPipeline completed.")
+    if args.dashboard:
+        print("Starting the dashboard on http://localhost:8501 (Ctrl+C to stop)")
+        return subprocess.run([python, "-m", "streamlit", "run", "dashboard/app.py"], cwd=ROOT).returncode
+    print("Dashboard: python -m streamlit run dashboard/app.py")
+    return 0
+
 
 if __name__ == "__main__":
-    run_project()
+    sys.exit(main())

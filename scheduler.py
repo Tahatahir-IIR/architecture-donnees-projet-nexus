@@ -1,44 +1,50 @@
-import time
-import schedule
-import subprocess
+"""Lightweight scheduler: run the batch pipeline every hour without Airflow.
+
+Usage (from the repository root):
+    python scheduler.py
+    python scheduler.py --sample --every 30     # every 30 minutes with the sample dataset
+"""
+import argparse
 import logging
-from datetime import datetime
+import subprocess
+import sys
+import time
+from pathlib import Path
 
-# Configuration du logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger("BigDataScheduler")
+import schedule
 
-def job():
-    """
-    Tâche exécutée toutes les heures : Scare 5 nouveaux produits et lance le pipeline.
-    """
-    logger.info("⏰ Lancement de la mise à jour horaire (Top 5 nouveaux produits)...")
-    
+ROOT = Path(__file__).resolve().parent
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("scheduler")
+
+
+def run_pipeline(extra_args: list) -> None:
+    logger.info("Starting scheduled pipeline run")
+    result = subprocess.run([sys.executable, "run_full_pipeline.py", *extra_args], cwd=ROOT)
+    if result.returncode == 0:
+        logger.info("Pipeline run finished")
+    else:
+        logger.error("Pipeline run failed with exit code %s", result.returncode)
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--every", type=int, default=60, help="interval in minutes (default 60)")
+    parser.add_argument("--sample", action="store_true", help="pass --sample to the pipeline")
+    args = parser.parse_args(argv)
+
+    extra = ["--sample"] if args.sample else []
+    run_pipeline(extra)
+    schedule.every(args.every).minutes.do(run_pipeline, extra)
+    logger.info("Scheduler active: the pipeline runs every %s minutes (Ctrl+C to stop)", args.every)
     try:
-        # 1. On lance le scraper avec un paramètre spécial ou on laisse le scraper gérer 5 produits
-        # Note: Pour que ce soit exactement 5 produits, on pourrait modifier le scraper 
-        # mais ici on va simplement relancer le pipeline complet pour s'assurer de la synchronisation totale.
-        logger.info("🛠️ Étape 1 : Collecte de nouvelles données...")
-        # On passe un argument fictif --limit 5 si on veut, mais exécutons le pipeline standard
-        subprocess.run(["python", "run_full_pipeline.py"], check=True)
-        
-        logger.info("✅ Mise à jour terminée avec succès !")
-        logger.info("📡 En attente de la prochaine heure...")
-        
-    except Exception as e:
-        logger.error(f"❌ Erreur lors de l'exécution du pipeline : {e}")
+        while True:
+            schedule.run_pending()
+            time.sleep(30)
+    except KeyboardInterrupt:
+        logger.info("Scheduler stopped")
+    return 0
 
-# Planification : Toutes les heures
-schedule.every(1).hours.do(job)
 
-# Lancement immédiat au démarrage une première fois
-job()
-
-logger.info("🚀 Planificateur activé : Le pipeline s'exécutera automatiquement toutes les 1 heure.")
-
-while True:
-    schedule.run_pending()
-    time.sleep(60) # Vérification chaque minute
+if __name__ == "__main__":
+    sys.exit(main())
