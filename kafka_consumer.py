@@ -1,48 +1,67 @@
+"""Consume product events from Kafka and print price alerts.
+
+Usage (from the repository root):
+    python kafka_consumer.py
+    python kafka_consumer.py --threshold 500      # alert when a price is below 500 DH
+"""
+import argparse
 import json
-import time
-from kafka import KafkaConsumer
 import logging
+import sys
 
-# Configuration du logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("KafkaConsumer")
+from kafka import KafkaConsumer
+from kafka.errors import KafkaError
 
-def start_consumer():
-    """
-    Consomme les messages du topic 'ecommerce_events' en temps réel.
-    """
+import config
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("kafka_consumer")
+
+
+def to_float(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--threshold", type=float, default=100.0, help="price alert threshold in DH")
+    parser.add_argument("--discount", type=float, default=20.0, help="discount alert threshold in percent")
+    args = parser.parse_args(argv)
+
     try:
         consumer = KafkaConsumer(
-            'ecommerce_events',
-            bootstrap_servers=['localhost:9092'],
-            auto_offset_reset='earliest',
+            config.KAFKA_TOPIC,
+            bootstrap_servers=config.KAFKA_BOOTSTRAP.split(","),
+            auto_offset_reset="earliest",
             enable_auto_commit=True,
-            group_id='ecommerce-monitoring-group',
-            value_deserializer=lambda x: json.loads(x.decode('utf-8'))
+            group_id="ecommerce-monitoring-group",
+            value_deserializer=lambda raw: json.loads(raw.decode("utf-8")),
         )
+    except KafkaError as exc:
+        logger.error("Cannot connect to Kafka at %s: %s", config.KAFKA_BOOTSTRAP, exc)
+        return 1
 
-        logger.info("📡 Consommateur Kafka démarré... En attente de nouveaux produits...")
-
+    logger.info("Consumer started on topic '%s', waiting for events...", config.KAFKA_TOPIC)
+    try:
         for message in consumer:
             product = message.value
-            
-            # Simulation d'un traitement en temps réel
-            price = product.get('price', 0)
-            name = product.get('name', 'Inconnu')
-            source = product.get('source', 'Inconnue')
-            
-            print(f"\n--- [NOUVEL EVENEMENT REÇU] ---")
-            print(f"📦 Produit : {name}")
-            print(f"💰 Prix    : {price} DH")
-            print(f"🌐 Source  : {source}")
-            print(f"-------------------------------")
+            price = to_float(product.get("current_price"))
+            discount = to_float(product.get("discount_percent"))
+            logger.info("%s | %.2f DH | %s | %s",
+                        product.get("name", "?"), price, product.get("source", "?"), product.get("category", "?"))
+            if 0 < price < args.threshold:
+                logger.warning("PRICE ALERT: %s at %.2f DH", product.get("name"), price)
+            if discount >= args.discount:
+                logger.warning("PROMOTION ALERT: %s at -%.0f%%", product.get("name"), discount)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        consumer.close()
+    return 0
 
-            # Ici, on pourrait ajouter une alerte prix
-            if price < 100:
-                print(f"🔥 ALERTE : Prix exceptionnel détecté !")
-
-    except Exception as e:
-        logger.error(f"❌ Erreur lors de la consommation : {e}")
 
 if __name__ == "__main__":
-    start_consumer()
+    sys.exit(main())
